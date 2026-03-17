@@ -1,0 +1,3 @@
+upstream realit_product_upstream {
+    server ${APP_CONTAINER_LINK};
+}

@@ -1,0 +1,47 @@
+## Production overrides for build & push to AWS ECR
+##
+## Usage (via Makefile — recommended):
+##   make deploy              # full pipeline: npm build → docker build → ECR push → ECS redeploy
+##   make build-prod-image    # build production images only
+##   make ecr-push TAG=v1.2.3 # push to ECR with specific tag
+##
+## Usage (manual — requires AWS_ACCOUNT_ID and valid ECR credentials):
+##   export AWS_ACCOUNT_ID=123456789012
+##   export TAG=main-abc1234
+##   docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+##   docker compose -f docker-compose.yml -f docker-compose.prod.yml push
+##
+## ECR Repositories (defined in CloudFormation 03-storage.yaml):
+##   paint-energymonitor-app    ← WebAppRepository
+##   paint-energymonitor-public ← NginxRepository
+
+services:
+  realit_app:
+    # ECR image URI — docker compose push will push directly to ECR
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-ap-northeast-1}.amazonaws.com/paint-energymonitor-app:${TAG:-latest}
+    # Target linux/amd64 for ECS Fargate (X86_64)
+    platform: linux/amd64
+    build:
+      target: realit-app
+      args:
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-unknown}
+        GIT_BRANCH_NAME: ${GIT_BRANCH_NAME:-unknown}
+    # No restart, ports, volumes needed for ECR build/push
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  realit_public:
+    # ECR image URI — docker compose push will push directly to ECR
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-ap-northeast-1}.amazonaws.com/paint-energymonitor-public:${TAG:-latest}
+    platform: linux/amd64
+    build:
+      target: realit-public
+      args:
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-unknown}
+        GIT_BRANCH_NAME: ${GIT_BRANCH_NAME:-unknown}
+    restart: "no"
+    ports: []
+    depends_on: []
+    healthcheck:
+      disable: true

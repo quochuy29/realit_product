@@ -1,0 +1,160 @@
+## Production image local test — NOT for development, NOT for ECR push
+##
+## Mục đích: Build đúng production target và chạy local để verify
+## trước khi push lên ECR / deploy lên ECS.
+##
+## Khác biệt so với docker-compose.override.yml (dev):
+##   - Build target: realit-app / realit-public (production)
+##   - Không mount source code vào container (code đã baked vào image)
+##   - APP_ENV=production, APP_DEBUG=false
+##   - SESSION_SECURE_COOKIE=false (HTTP local)
+##   - Không có Xdebug, không có Vite HMR
+##
+## Usage (via Makefile — recommended):
+##   make prod-test-up       # build + start
+##   make prod-test-migrate  # chạy migration
+##   make prod-test-down     # stop
+##   make prod-test-logs     # xem logs
+##
+## Usage (manual):
+##   docker compose -f docker-compose.yml -f docker-compose.prod-test.yml up --build -d
+
+services:
+  realit_app:
+    image: realit-app:prod-test
+    build:
+      target: realit-app
+      args:
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-local}
+        GIT_BRANCH_NAME: ${GIT_BRANCH_NAME:-local}
+    restart: unless-stopped
+    depends_on:
+      realit_db_prod:
+        condition: service_healthy
+    networks:
+      - realit-network
+    environment:
+      APPLICATION_ENV: production
+      APP_ENV: production
+      APP_NAME: realit
+      APP_DEBUG: "true" # Tạm set true để dễ debug trong giai đoạn test local, sẽ set false khi deploy thật
+      APP_URL: http://localhost:8080
+      APP_TIMEZONE: Asia/Tokyo
+      TZ: Asia/Tokyo
+      APP_LOCALE: ja
+      APP_FALLBACK_LOCALE: ja
+      APP_KEY: ${APP_KEY}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+      # Session — HTTP local (no HTTPS)
+      SESSION_DRIVER: database
+      SESSION_LIFETIME: "120"
+      SESSION_ENCRYPT: "false"
+      SESSION_SECURE_COOKIE: "false"
+      SESSION_SAME_SITE: lax
+      # SESSION_DOMAIN intentionally NOT set (breaks cookie through VPN/proxy)
+      # Sanctum — hostname only, no protocol, no trailing slash
+      SANCTUM_STATEFUL_DOMAINS: alb.paint-energymonitor.local,alb.paint-energymonitor.local:8081, localhost, localhost:8080
+      # Database — trỏ tới DB prod-test local (MySQL)
+      DB_CONNECTION: mysql
+      DB_HOST: realit_db_prod
+      DB_PORT: "3306"
+      DB_DATABASE: ${DB_DATABASE:-realit}
+      DB_USERNAME: ${DB_USERNAME:-realit}
+      DB_PASSWORD: ${DB_PASSWORD:-realit2026}
+      # Misc
+      BROADCAST_CONNECTION: log
+      FILESYSTEM_DISK: local
+      QUEUE_CONNECTION: database
+      CACHE_STORE: database
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-a}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-a}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-a}
+      AWS_BUCKET: ${AWS_BUCKET:-a}  # bucket này đã tạo sẵn trên AWS, chỉ để test upload file từ local lên S3 (không dùng MinIO local)
+      AWS_USE_PATH_STYLE_ENDPOINT: "false"
+      AWS_BUCKET_UPLOAD: ${AWS_BUCKET_UPLOAD:-a}  # bucket này đã tạo sẵn trên AWS, chỉ để test upload file từ local lên S3 (không dùng MinIO local)
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  realit_public:
+    image: realit-public:prod-test
+    build:
+      target: realit-public
+      args:
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-local}
+        GIT_BRANCH_NAME: ${GIT_BRANCH_NAME:-local}
+    ports:
+      - "${DOCKER_EXPOSE_WEB_PORT:-8080}:80"
+    restart: unless-stopped
+    depends_on:
+      realit_app:
+        condition: service_healthy
+    networks:
+      - realit-network
+    environment:
+      - APP_CONTAINER_LINK=realit_app:9000
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Fake ALB: giả lập AWS Application Load Balancer
+  # Inject đúng X-Forwarded-* headers như ALB thật, proxy tới realit_public
+  # Truy cập: http://localhost:8081  hoặc  http://alb.paint-energymonitor.local:8081
+  fake_alb:
+    container_name: realit_fake_alb
+    image: nginx:1.21.5-alpine
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./.docker/nginx/conf.d/fake-alb.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      realit_public:
+        condition: service_healthy
+    networks:
+      - realit-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # MySQL riêng cho prod-test (không dùng chung với dev DB)
+  realit_db_prod:
+    container_name: realit_db_prod
+    image: mysql:8.0
+    restart: unless-stopped
+    ports:
+      - "${DOCKER_EXPOSE_DB_PROD_PORT:-5435}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-realit2026}
+      MYSQL_DATABASE: ${DB_DATABASE:-realit}
+      MYSQL_USER: ${DB_USERNAME:-realit}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-realit2026}
+      TZ: Asia/Tokyo
+    volumes:
+      - data-mysql-prod-test:/var/lib/mysql:delegated
+    networks:
+      - realit-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${DB_PASSWORD:-realit2026} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  data-mysql-prod-test:
+    driver: local
+
+networks:
+  realit-network:
+    external: true
+    name: realit-network

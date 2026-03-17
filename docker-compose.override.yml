@@ -1,0 +1,95 @@
+## For developer only
+## Please read use guide in ./docs/dev-on-docker-env-note.pdf
+## [usage]
+## Run in development env
+#     docker-compose up
+## To see config after merge please run command:
+#     docker-compose config
+services:
+  realit_app:
+    working_dir: /var/www/html/realit_product
+    user: "$uid"
+    image: realit-php-fpm-dev
+    build:
+      target: php-fpm-dev
+      args:
+        USER_ID: ${uid:-1000}
+        GROUP_ID: ${gid:-1000}
+    ports:
+      - "${DOCKER_EXPOSE_VITE_PORT:-5173}:5173"
+    networks:
+      - realit-network
+    volumes:
+      - .:/var/www/html/realit_product:delegated
+      - .docker/php/conf.d/z-xdebug.dev.ini:/usr/local/etc/php/conf.d/z-xdebug.dev.ini
+      - .docker/php/conf.d/z-php.dev.ini:/usr/local/etc/php/conf.d/z-php.dev.ini
+    extra_hosts: #uncomment this section if you use linux and want run xdebug
+      - host.docker.internal:host-gateway # support on linux host, container communicate with host over domain host.docker.internal (docker engine ver > 20.10)
+    environment:
+      APPLICATION_ENV: ${APP_ENV:-development}
+      # xdebug
+      PHP_IDE_CONFIG: serverName=realit-docker
+      # for run phpunit only, see environment var needed in tests/bootstrap.php (search with keyword 'getenv')
+      APP_SUBDOMAIN: ${APP_SUBDOMAIN:-localhost}
+      TEST_DB_HOST: ${TEST_DB_HOST:-realit_db}
+      TEST_DB_NAME: ${TEST_DB_NAME:-realit_unittest}
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  realit_public:
+    working_dir: /var/www/html/realit_product/public
+    image: realit-nginx-builder
+    build:
+      target: nginx-builder
+    environment:
+      - APP_CONTAINER_LINK=realit_app:9000
+    networks:
+      - realit-network
+    volumes:
+      - ./public:/var/www/html/realit_product/public
+      - ./storage/app/public:/var/www/html/realit_product/storage/app/public
+      - .docker/nginx/conf.d/realit-app.conf:/etc/nginx/conf.d/default.conf
+      - .docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  realit_db:
+    container_name: realit_db
+    image: mysql:8.0
+    restart: always
+    ports:
+      - "${DOCKER_EXPOSE_DB_PORT:-3307}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-realit2026}
+      MYSQL_DATABASE: ${DB_DATABASE:-realit}
+      MYSQL_USER: ${DB_USERNAME:-realit}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-realit2026}
+      TZ: ${APP_TIMEZONE:-Asia/Tokyo}
+    volumes:
+      - data-mysql-realit:/var/lib/mysql:delegated
+    networks:
+      - realit-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${DB_PASSWORD:-realit2026} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# [ volumes definition ]
+# creates Docker volumes which can be mounted by other containers too e.g. for backup
+volumes:
+  data-mysql-realit:
+    driver: local
+
+# [ networks definition ]
+networks:
+  realit-network:
+    external: true
+    name: realit-network

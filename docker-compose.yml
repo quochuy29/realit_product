@@ -1,0 +1,56 @@
+## Base service of bizcrm application:
+## Please read use guide in ./docs/dev-on-docker-env-note.pdf
+## This app will deploy on ECS so we can't use custom network need use deprecated docker 'link' feature
+## 1. Combined this file with docker-composer.prod.yml to build and run production image
+## 2. Combined this file with docker-composer.overrides.yml to build and run dev image
+services:
+  realit_app:
+    image: realit-app:${TAG:-latest}
+    container_name: realit_app
+    init: true
+    environment:
+      APPLICATION_ENV: production
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile
+      target: realit-app
+      args:
+        GIT_COMMIT_HASH: N/A
+        GIT_BRANCH_NAME: N/A
+    tty: true
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  realit_public:
+    image: realit-public:${TAG:-latest}
+    container_name: realit_public
+    init: true
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile
+      target: realit-public
+      args:
+        GIT_COMMIT_HASH: N/A
+        GIT_BRANCH_NAME: N/A
+    ports:
+      - "${DOCKER_EXPOSE_WEB_PORT:-8080}:80"
+    restart: always
+    depends_on:
+      realit_app:
+        condition: service_healthy
+    environment:
+        - APP_CONTAINER_LINK=realit_app:9000
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  realit-network:
+    name: realit-network
+    driver: bridge

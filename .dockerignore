@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+vendor
+npm-debug.log
+yarn-error.log
+
+# Laravel
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+!storage/framework/cache/.gitkeep
+!storage/framework/sessions/.gitkeep
+!storage/framework/views/.gitkeep
+bootstrap/cache/*.php
+
+# Testing
+tests
+.phpunit.result.cache
+coverage
+
+# Documentation
+README.md
+DOCKER_REVIEW.md
+CONFIG_REVIEW.md
+docs
+
+# Docker
+docker-compose*.yml
+.dockerignore
+Dockerfile
+Makefile
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts (keep public/build - Vite compiled assets needed in production image)
+# public/build  <-- DO NOT exclude, needed for production
+public/hot
+public/storage
+storage/*.key
+
+# Temporary files
+*.tmp
+*.log
+*.cache
+
